@@ -105,11 +105,110 @@ app(function(){
 	
 })(function(){
 	
+	const TYPE_NEW_NODE = 0;
+	const TYPE_NEW_LINK = 1;
+	const TYPE_MOVE_NODE = 2;
+	const TYPE_MOVE_LINK = 3;
+
+	const RENDER_LISTENERS = [];
+	
+	RENDER_LISTENERS[TYPE_NEW_NODE]  = function(node, queueMap, container, elements){
+		var id = node.id
+		  , elem = elements[id] = document.createElement('div');
+		elem.className = 'node';
+		queueMap[TYPE_MOVE_NODE].insert(node.id, node);
+		container.appendChild(elem);
+	];
+	
+	RENDER_LISTENERS[TYPE_NEW_LINK]  = function(link, queueMap, container, elements){
+		var id = link.id
+		  , elem = elements[id] = document.createElement('div');
+		elem.className = 'link';
+		queueMap[TYPE_MOVE_LINK].insert(link.id, link);
+	];
+	
+	RENDER_LISTENERS[TYPE_MOVE_NODE] = function(node, queueMap, container, elements){
+		var id = node.id
+		  , style = elements[id].style
+		  , links = node.links
+		  , link
+		  , queue = queueMap[TYPE_MOVE_LINK]
+		  , point = node.point;
+		style.top = point[0] + 'px;
+		style.left = point[1] + 'px;
+		for(var i=links.length; i--;){
+			link = links[i];
+			queue.insert(link.id, link);
+		}
+	];
+	
+	RENDER_LISTENERS[TYPE_MOVE_NODE] = function(link, queueMap, container, elements){
+		var id = link
+		  , style = elements[id].style
+		  , p1 = link.src.point
+		  , p2 = link.dst.point
+		  , dx = p2[0] - p1[0]
+		  , dy = p2[1] - p1[1]
+		  , deg = Math.atan2(dy, dx) * toDeg
+		  , len = Math.sqtr((dx*dx)+(dy*dy));
+		style.width = len.toFixed(1) + 'px';
+		style.transform = 'rodate('+deg+'deg)';
+	];
+	
+	
+	const render = this.render;
+	const Queue = this.Queue;
+	const RENDER_QUEUE = 0;
+	const RENDER_ID = 1;
+	const RENDER_WRITER = 2;
+	const RENDER_ELEMENTS = 3;
+	const RENDER_CONTAINER = 4;
+	
+	function fetch(){
+		var queueMap = this[RENDER_QUEUE];
+		  , newQueueMapa = this[RENDER_QUEUE] = [];
+		newQueueMapa[TYPE_NEW_NODE]  = new Queue();
+		newQueueMapa[TYPE_NEW_LINK]  = new Queue();
+		newQueueMapa[TYPE_MOVE_NODE] = new Queue();
+		newQueueMapa[TYPE_MOVE_LINK] = new Queue();
+		return queueMap;
+	}
+	
+	function graphRender(){
+		var queueMap = fetch.call(this)
+		  , queue
+		  , listener
+		  , item
+		  , container = this[RENDER_CONTAINER]
+		  , elements  = this[RENDER_ELEMENTS];
+		for(var i=0; i<4; i++){
+			queue = queueMap[i];
+			listener = RENDER_LISTENERS[i];
+			while(item = queue.shift()) listener.call(this, item, queueMap, container, elements);
+		}
+	}
+	
+	var LAST_ID = 1;
 	
 	class Render extends Array {
 		
+		constructor(){
+			var self = this;
+			fetch.call(this);
+			this[RENDER_ID] = LAST_ID++;
+			this[RENDER_ELEMENTS] = {};
+			this[RENDER_CONTAINER] = null;
+			this[RENDER_WRITER] = graphRender.bind(this);
+		}
+		
+		fire(type, item){
+			this[RENDER_QUEUE][type].insert(item.id, item);
+			render.write(this[RENDER_WRITER], this[RENDER_ID]);
+		}
 		
 	}
+
+	// #### GRAPH #####################
 	
 	const GRAPH_NODES = 0;
 	const GRAPH_LINKS = 1;
@@ -122,6 +221,12 @@ app(function(){
 			this[GRAPH_NODES] = {};
 			this[GRAPH_RENDER] = new Render(this);
 		}
+		
+		
+		
+	}
+	
+	class Node extends Array {
 		
 		
 		

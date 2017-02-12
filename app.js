@@ -133,7 +133,7 @@ app(function(){
 		  , links = node.links
 		  , link
 		  , queue = queueMap[TYPE_MOVE_LINK]
-		  , point = node.point;
+		  , point = node.absPoint;
 		style.top = point[0] + 'px;
 		style.left = point[1] + 'px;
 		for(var i=links.length; i--;){
@@ -145,8 +145,8 @@ app(function(){
 	RENDER_LISTENERS[TYPE_MOVE_NODE] = function(link, queueMap, container, elements){
 		var id = link
 		  , style = elements[id].style
-		  , p1 = link.src.point
-		  , p2 = link.dst.point
+		  , p1 = link.src.absPoint
+		  , p2 = link.dst.absPoint
 		  , dx = p2[0] - p1[0]
 		  , dy = p2[1] - p1[1]
 		  , deg = Math.atan2(dy, dx) * toDeg
@@ -188,27 +188,44 @@ app(function(){
 		}
 	}
 	
-	var LAST_ID = 1;
+	function fire(type, item){
+		this[RENDER_QUEUE][type].insert(item.id, item);
+		render.write(this[RENDER_WRITER], this[RENDER_ID]);
+		return this;
+	}
+	
+	var RENDER_LAST_ID = 1;
 	
 	class Render extends Array {
 		
 		constructor(){
 			var self = this;
 			fetch.call(this);
-			this[RENDER_ID] = LAST_ID++;
+			this[RENDER_ID] = RENDER_LAST_ID++;
 			this[RENDER_ELEMENTS] = {};
 			this[RENDER_CONTAINER] = null;
 			this[RENDER_WRITER] = graphRender.bind(this);
 		}
 		
-		fire(type, item){
-			this[RENDER_QUEUE][type].insert(item.id, item);
-			render.write(this[RENDER_WRITER], this[RENDER_ID]);
+		fireNewNode(item){
+			return fire.call(this, TYPE_NEW_NODE, item);
 		}
 		
+		fireNewLink(item){
+			return fire.call(this, TYPE_NEW_LINK, item);
+		}
+		
+		fireMoveNode(item){
+			return fire.call(this, TYPE_MOVE_NODE, item);
+		}
+		
+		fireMoveLink(item){
+			return fire.call(this, TYPE_MOVE_LINK, item);
+		}
 	}
 
-	// #### GRAPH #####################
+})(function(){
+
 	
 	const GRAPH_NODES = 0;
 	const GRAPH_LINKS = 1;
@@ -222,14 +239,162 @@ app(function(){
 			this[GRAPH_RENDER] = new Render(this);
 		}
 		
+		get render(){
+			return this[GRAPH_RENDER];
+		}
 		
+		link(idA, idB){
+			var linkID = idA + ':' + idB
+			  , link = this[GRAPH_LINKS][linkID];
+			if(!link){
+				var src = this.get(idA)
+				  , dst = this.get(idB);
+				link = this[GRAPH_LINKS][linkID] = new Link(linkID, src, dst);
+			}
+			return link;
+		}
 		
+		get(id){
+			var node = this[GRAPH_NODES][id];
+			if(!node){
+				node = this[GRAPH_NODES][id] = new Node(id);
+			}
+			return node;
+		}
+		
+		load(data){
+			var keys = Object.keys(data)
+		}
+		
+	}
+	
+	// #### LINK #######################
+	
+	const LINK_ID = 0;
+	const LINK_DST = 1;
+	const LINK_SRC = 2;
+	
+	class Link extends Array {
+		
+		constructor(id, src, dst){
+			this[LINK_ID] = id;
+			this[LINK_DST] = dst;
+			this[LINK_SRC] = src;
+			src[NODE_LINKS].push(this);
+			dst[NODE_LINKS].push(this);
+			src[NODE_DST].push(dst);
+			dst[NODE_SRC].push(src);
+		}
+		
+		get id (){return this[LINK_ID] ;}
+		get dst(){return this[LINK_DST];}
+		get src(){return this[LINK_SRC];}
+		
+	}
+	
+	const NODE_ID = 0;
+	const NODE_OFF_POINT = 1;
+	const NODE_REL_POINT = 2;
+	const NODE_ABS_POINT = 3;
+	const NODE_LINKS = 4;
+	const NODE_DST = 5;
+	const NODE_SRC = 6;
+	const NODE_GRAPH = 7;
+	
+	function clear(node){
+		node[NODE_OFF_POINT] = node[NODE_ABS_POINT] = null;
+		clearChild(node.dst);
+		node.graph.render.fire(TYPE_MOVE_NODE, node);
+	}
+	
+	function clearChild(list){
+		for(var i=list.length; i--;){
+			clear(list[i]);
+		}
 	}
 	
 	class Node extends Array {
 		
+		constructor(id, graph){
+			this[NODE_ID] = id;
+			this[NODE_GRAPH] = graph;
+			this[NODE_OFF_POINT] = null;
+			this[NODE_ABS_POINT] = null;
+			this[NODE_REL_POINT] = [0,0];
+			this[NODE_DST] = [];
+			this[NODE_SRC] = [];
+			this[NODE_LINKS] = [];
+			graph.render.fire(TYPE_NEW_NODE, this);
+		}
 		
+		get graph(){
+			return this[NODE_GRAPH];
+		}
+		
+		get id(){
+			return this[NODE_ID];
+		}
+
+		get dst(){
+			return this[NODE_DST];
+		}
+		
+		get src(){
+			return this[NODE_SRC];
+		}
+		
+		get absPoint(){
+			if(!this[NODE_ABS_POINT]){
+				var off = this.offPoint
+				  , rel = this[NODE_REL_POINT];
+				return this[NODE_ABS_POINT] = [off[0] + rel[0], off[1] + rel[1]];
+			}
+			return this[NODE_ABS_POINT];
+		}
+		
+		set absPoint(abs){
+			var off = this.offPoint;
+			this.relPoint = [abs[0] - off[0], abs[1] - off[1]];
+			this[NODE_ABS_POINT] = abs;
+			clearChild(this.dst);
+		}
+		
+		get offPoint(){
+			var off = this[NODE_OFF_POINT];
+			if(!off){
+				off = this[NODE_OFF_POINT] = [0,0];
+				var dst = this.dst
+				  , abs
+				  , len = dst.length;
+				for(var i=len; i--;){
+					abs = dst[i].absPoint;
+					off[0] += abs[0];
+					off[1] += abs[1];
+				}
+				if(len > 1){
+					off[0] /= len;
+					off[1] /= len;
+				}
+			}
+			return off;
+		}
+		
+		get relPoint(){
+			return this[NODE_REL_POINT];
+		}
+		
+		set relPoint(rel){
+			this[NODE_REL_POINT] = rel;
+			this[NODE_ABS_POINT] = null;
+			clearChild(this.dst);
+			graph.render.fire(TYPE_MOVE_NODE, this);
+		}
 		
 	}
+	
+})(function(){
+	
+	
+	
 	
 })
